@@ -47,14 +47,14 @@ def metric_failure_default(metric):
 
 def metric_count_failures(result, baseKey, count):
     """Counts the number of chain failures ("x") for the specified keys."""
-    count = 0
+    failures = 0
     baseKeys = baseKey.split(",")
     for baseKey in baseKeys:
         for i in range(1, count):
             key = baseKey.replace("[i]", str(i))
             if key in result:
-                count += str(result[key]).count('x')
-    return count
+                failures += str(result[key]).count('x')
+    return failures
 
 def max_value_for_keys(result, baseKey, count):
     """Finds the maximum value for the specified keys."""
