@@ -5,6 +5,10 @@ import json
 import os
 import socket
 import subprocess
+try:
+    import redis
+except ImportError:
+    pass
 
 ### Constants.
 typesValid = ["A3", "D3", "L3+", "S9", "T9+"]
@@ -119,6 +123,9 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="Query a Bitmain Antminer and return Zabbix compatible data.")
     parser.add_argument("-ep", "--enable-ping", help="Enable an initial ping check on host before query.", action="store_true")
     parser.add_argument("-p", "--port", help="Change the API port. (Default: 4028)", type=int, default=4028)
+    parser.add_argument("-r", "--redis", help="Enable Redis caching for multiple subsequent API calls.", action="store_true")
+    parser.add_argument("-rh", "--redis-host", help="Set the Redis host. (Default: localhost)", default="localhost")
+    parser.add_argument("-rt", "--redis-ttl", help="Set the Redis TTL in seconds. (Default: 10)", type=int, default=30)
     parser.add_argument("-t", "--timeout", help="Set the timeout in seconds. (Default: 1)", type=int, default=1)
     parser.add_argument("-v", "--verbose", help="Increases the level of debugging verbosity.", action="count")
     parser.add_argument("type", help="The type of Antminer. Valid options: " + ", ".join(typesValid), type=validate_argument_type)
@@ -127,13 +134,23 @@ def parse_arguments():
     return parser.parse_args()
 
 ### Network functions.
-def api(host, port, command, timeout=1):
+def api(host, port, command, timeout=1, use_redis=False, redis_ttl=30, redis_host="localhost"):
     """Performs an API connection to the Antminer and returns the data received."""
+    # Check for Redis cached instance.
+    if use_redis:
+        redis_key = host+"-"+command
+        r = redis.StrictRedis(host=redis_host, port=6379, db=0)
+        data = r.get(redis_key)
+        if data != None:
+            return api_data_decode(data)
+
+    # Request data via API.
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(timeout)
     sock.connect((host, port))
     sock.send(json.dumps({"command": command}).encode())
 
+    # Gather result data.
     result = ""
     while True:
         buf = sock.recv(4096)
@@ -142,10 +159,23 @@ def api(host, port, command, timeout=1):
         else:
             break
 
-    data = str(result[:-1]) # Remove trailing new line.
-    data = data.replace('}{','},{') # Fix for broken JSON in Antminer output.
-    data = json.loads(data) # Parse string to dictionary.
-    return data
+    # Cache to Redis.
+    if use_redis:
+        r.setex(redis_key, redis_ttl, result)
+
+    return api_data_decode(result)
+
+def api_data_decode(data):
+    """Decodes the data from the API returning a dictionary."""
+    try:
+        dataout = data.decode("utf-8")
+    except:
+        dataout = str(data)
+    dataout = dataout.strip(' \t\r\n\0') # Remove trailing new line.
+    dataout = dataout.replace('}{','},{') # Fix for broken JSON in Antminer output.
+    dataout = json.loads(dataout) # Parse string to dictionary.
+
+    return dataout
 
 def ping(host):
     """Pings the selected host and returns true or false depending on the result."""
@@ -168,7 +198,7 @@ if args.enable_ping == True and ping(args.ip) == False:
 
 # Query API.
 try:
-    api_result = api(args.ip, args.port, metric_to_api_command(args.metric), timeout=args.timeout)
+    api_result = api(args.ip, args.port, metric_to_api_command(args.metric), timeout=args.timeout, use_redis=args.redis, redis_ttl=args.redis_ttl, redis_host=args.redis_host)
 except Exception as exception:
     if args.verbose is not None and args.verbose >= 1:
         print(exception)
