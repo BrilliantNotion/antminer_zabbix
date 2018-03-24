@@ -8,7 +8,7 @@ From the command line, you can type `./antminer_zabbix.py -h` at any time to get
 
 The three required arguments are: TYPE, IP, and METRIC
 
-- TYPE is the Antminer type: A3+, D3, L3+, S9, or T9+
+- TYPE is the Antminer type: A3+, D3, L3+, S9, T9+, or NA (Not Applicable)
 - IP is the IP of the Antminer. eg: 192.168.0.42
 - METRIC is the value you want to query: averageSpeed, averageSpeed5s, chainFailures, chipTemp, errorRate, fanFront, fanRear, pcbTemp, speed
 
