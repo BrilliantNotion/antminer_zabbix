@@ -10,9 +10,9 @@ try:
 except ImportError:
     pass
 
-### Constants.
-typesValid = ["A3", "D3", "L3+", "S9", "T9+"]
-metricsValid = ["averageSpeed", "averageSpeed5s", "chainFailures", "chipTemp", "errorRate", "fanFront", "fanRear", "pcbTemp", "speed"]
+### Constants. (See parse_arguments() for additional defaults.)
+types_valid = ["NA", "A3", "D3", "L3+", "S9", "T9+"]
+metrics_valid = ["averageSpeed", "averageSpeed5s", "chainFailures", "chipTemp", "errorRate", "fanFront", "fanRear", "pcbTemp", "speed"]
 
 ### Calculation functions.
 def metric_to_api_command(metric):
@@ -49,24 +49,24 @@ def metric_failure_default(metric):
     """Returns the default failue value for the specified metric."""
     return "0"
 
-def metric_count_failures(result, baseKey, count):
+def metric_count_failures(result, base_key, count):
     """Counts the number of chain failures ("x") for the specified keys."""
     failures = 0
-    baseKeys = baseKey.split(",")
-    for baseKey in baseKeys:
+    base_keys = base_key.split(",")
+    for base_key in base_keys:
         for i in range(1, count):
-            key = baseKey.replace("[i]", str(i))
+            key = base_key.replace("[i]", str(i))
             if key in result:
                 failures += str(result[key]).count('x')
     return failures
 
-def max_value_for_keys(result, baseKey, count):
+def max_value_for_keys(result, base_key, count):
     """Finds the maximum value for the specified keys."""
     values = []
-    baseKeys = baseKey.split(",")
-    for baseKey in baseKeys:
+    base_keys = base_key.split(",")
+    for base_key in base_keys:
         for i in range(1, count):
-            key = baseKey.replace("[i]", str(i))
+            key = base_key.replace("[i]", str(i))
             if key in result:
                 values.append(result[key])
     return max(values)
@@ -100,13 +100,13 @@ def calculate_value(miner_type, metric, api_result):
 ### Argument functions.
 def validate_argument_type(value):
     """Validator for type argument."""
-    if value not in typesValid:
+    if value not in types_valid:
          raise argparse.ArgumentTypeError('"%s" is not a valid Antminer type.' % value)
     return value
 
 def validate_argument_metric(value):
     """Validator for metric argument."""
-    if value not in metricsValid:
+    if value not in metrics_valid:
          raise argparse.ArgumentTypeError('"%s" is not a valid metric.' % value)
     return value
 
@@ -125,21 +125,23 @@ def parse_arguments():
     parser.add_argument("-p", "--port", help="Change the API port. (Default: 4028)", type=int, default=4028)
     parser.add_argument("-r", "--redis", help="Enable Redis caching for multiple subsequent API calls.", action="store_true")
     parser.add_argument("-rh", "--redis-host", help="Set the Redis host. (Default: localhost)", default="localhost")
-    parser.add_argument("-rt", "--redis-ttl", help="Set the Redis TTL in seconds. (Default: 10)", type=int, default=30)
+    parser.add_argument("-rd", "--redis-database", help="Set the Redis database. (Default: 0)", type=int, default=0)
+    parser.add_argument("-rp", "--redis-prefix", help="Set the Redis key prefix. (Default: \"antminerZabbix:\")", default="antminerZabbix:")
+    parser.add_argument("-rt", "--redis-ttl", help="Set the Redis TTL in seconds. (Default: 30)", type=int, default=30)
     parser.add_argument("-t", "--timeout", help="Set the timeout in seconds. (Default: 1)", type=int, default=1)
     parser.add_argument("-v", "--verbose", help="Increases the level of debugging verbosity.", action="count")
-    parser.add_argument("type", help="The type of Antminer. Valid options: " + ", ".join(typesValid), type=validate_argument_type)
+    parser.add_argument("type", help="The type of Antminer. Valid options: " + ", ".join(types_valid), type=validate_argument_type)
     parser.add_argument("ip", help="The IP address of the Antminer. eg: 192.168.0.42", type=validate_argument_ip)
-    parser.add_argument("metric", help="The desired metric. Valid options: " + ", ".join(metricsValid), type=validate_argument_metric)
+    parser.add_argument("metric", help="The desired metric. Valid options: " + ", ".join(metrics_valid), type=validate_argument_metric)
     return parser.parse_args()
 
 ### Network functions.
-def api(host, port, command, timeout=1, use_redis=False, redis_ttl=30, redis_host="localhost"):
+def api(host, port, command, timeout=1, use_redis=False, redis_ttl=30, redis_host="localhost", redis_database=0, redis_prefix=""):
     """Performs an API connection to the Antminer and returns the data received."""
     # Check for Redis cached instance.
     if use_redis:
-        redis_key = host+"-"+command
-        r = redis.StrictRedis(host=redis_host, port=6379, db=0)
+        redis_key = redis_prefix+host+"-"+command
+        r = redis.StrictRedis(host=redis_host, port=6379, db=redis_database)
         data = r.get(redis_key)
         if data != None:
             return api_data_decode(data)
@@ -198,7 +200,7 @@ if args.enable_ping == True and ping(args.ip) == False:
 
 # Query API.
 try:
-    api_result = api(args.ip, args.port, metric_to_api_command(args.metric), timeout=args.timeout, use_redis=args.redis, redis_ttl=args.redis_ttl, redis_host=args.redis_host)
+    api_result = api(args.ip, args.port, metric_to_api_command(args.metric), timeout=args.timeout, use_redis=args.redis, redis_ttl=args.redis_ttl, redis_host=args.redis_host, redis_database=args.redis_database, redis_prefix=args.redis_prefix)
 except Exception as exception:
     if args.verbose is not None and args.verbose >= 1:
         print(exception)
