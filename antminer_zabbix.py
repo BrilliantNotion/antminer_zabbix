@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from numbers import Number
 import os
 import socket
 import subprocess
@@ -11,43 +12,71 @@ except ImportError:
     pass
 
 ### Constants. (See parse_arguments() for additional defaults.)
-types_valid = ["NA", "A3", "D3", "L3+", "S9", "T9+"]
-metrics_valid = ["averageSpeed", "averageSpeed5s", "chainFailures", "chipTemp", "errorRate", "fanFront", "fanRear", "pcbTemp", "speed"]
+types_valid = ["AUTO", "A3", "D3", "L3+", "S9", "T9+"]
+metrics_valid = ["averageSpeed", "averageSpeed5s", "chainFailures", "chainsActive", "chipTemp", "errorRate", "fanFront", "fanRear", "frequency", "pcbTemp", "speed", "type", "typeFull"]
 
 ### Calculation functions.
 def metric_to_api_command(metric):
-    """Returns the associated API command for the specified metric.""" 
+    """Returns the associated API command for the specified metric."""
     switcher = {
         "averageSpeed": "summary",
         "averageSpeed5s": "summary",
         "chainFailures": "stats",
+        "chainsActive": "stats",
         "chipTemp": "stats",
         "errorRate": "summary",
         "fanFront": "stats",
         "fanRear": "stats",
+        "frequency": "stats",
         "pcbTemp": "stats",
         "speed": "summary",
+        "type": "stats",
+        "typeFull": "stats",
     }
     return switcher.get(metric, None)
 
 def metric_to_keys(metric):
-    """Returns the associated key for the specified metric.""" 
+    """Returns the associated key for the specified metric."""
     switcher = {
         "averageSpeed": "GHS av",
         "averageSpeed5s": "GHS 5s",
         "chainFailures": "chain_acs[i]",
+        "chainsActive": "chain_acs[i]",
         "chipTemp": "temp2_[i]",
         "errorRate": "Device Hardware%",
         "fanFront": "fan1,fan3",
         "fanRear": "fan2,fan6",
+        "frequency": "chain_rate[i],frequency,frequency[i],freq_avg[i]",
         "pcbTemp": "temp3_[i],temp[i]",
         "speed": "GHS 5s",
+        "type": "Type",
+        "typeFull": "Type",
     }
     return switcher.get(metric, None)
 
-def metric_failure_default(metric):
-    """Returns the default failue value for the specified metric."""
-    return "0"
+def metric_failure_default(metric, failure_value="AUTO"):
+    """Returns the default failure value for the specified metric."""
+
+    if failure_value != "AUTO":
+        return failure_value
+
+    switcher = {
+        "chainsActive": "-1",
+        "type": "",
+        "typeFull": "",
+    }
+    return switcher.get(metric, "0")
+
+def metric_count_active(result, base_key, count):
+    """Counts the number of chain active ("o") for the specified keys."""
+    active = 0
+    base_keys = base_key.split(",")
+    for base_key in base_keys:
+        for i in range(1, count):
+            key = base_key.replace("[i]", str(i))
+            if key in result:
+                active += str(result[key]).count('o')
+    return active
 
 def metric_count_failures(result, base_key, count):
     """Counts the number of chain failures ("x") for the specified keys."""
@@ -67,11 +96,11 @@ def max_value_for_keys(result, base_key, count):
     for base_key in base_keys:
         for i in range(1, count):
             key = base_key.replace("[i]", str(i))
-            if key in result:
-                values.append(result[key])
+            if key in result and (isinstance(result[key], Number) or result[key].isdigit()):
+                values.append(int(result[key]))
     return max(values)
 
-def calculate_value(miner_type, metric, api_result):
+def calculate_value(miner_type, metric, api_result, failure_value="AUTO"):
     """Calculate the value for the specified metric and type using the resulting API data."""
     try:
         if metric == "averageSpeed":
@@ -80,6 +109,8 @@ def calculate_value(miner_type, metric, api_result):
             result = api_result["SUMMARY"][0][metric_to_keys(metric)]
         elif metric == "chainFailures":
             result = metric_count_failures(api_result["STATS"][1], metric_to_keys(metric), 64)
+        elif metric == "chainsActive":
+            result = metric_count_active(api_result["STATS"][1], metric_to_keys(metric), 64)
         elif metric == "chipTemp":
             result = max_value_for_keys(api_result["STATS"][1], metric_to_keys(metric), 64)
         elif metric == "errorRate":
@@ -88,12 +119,18 @@ def calculate_value(miner_type, metric, api_result):
             result = max_value_for_keys(api_result["STATS"][1], metric_to_keys(metric), 64)
         elif metric == "fanRear":
             result = max_value_for_keys(api_result["STATS"][1], metric_to_keys(metric), 64)
+        elif metric == "frequency":
+            result = max_value_for_keys(api_result["STATS"][1], metric_to_keys(metric), 64)
         elif metric == "pcbTemp":
             result = max_value_for_keys(api_result["STATS"][1], metric_to_keys(metric), 64)
         elif metric == "speed":
             result = api_result["SUMMARY"][0][metric_to_keys(metric)]
+        elif metric == "type":
+            result = api_result["STATS"][0][metric_to_keys(metric)].replace("Antminer ", "")
+        elif metric == "typeFull":
+            result = api_result["STATS"][0][metric_to_keys(metric)]
     except:
-        result = metric_failure_default(metric)
+        result = metric_failure_default(metric, failure_value=failure_value)
 
     return result
 
@@ -122,6 +159,7 @@ def parse_arguments():
     """Initialize argument parser and validate."""
     parser = argparse.ArgumentParser(description="Query a Bitmain Antminer and return Zabbix compatible data.")
     parser.add_argument("-ep", "--enable-ping", help="Enable an initial ping check on host before query.", action="store_true")
+    parser.add_argument("-fv", "--failure-value", help="Set the string value to return in the event of an error. (Default: AUTO)", default="AUTO")
     parser.add_argument("-p", "--port", help="Change the API port. (Default: 4028)", type=int, default=4028)
     parser.add_argument("-r", "--redis", help="Enable Redis caching for multiple subsequent API calls.", action="store_true")
     parser.add_argument("-rh", "--redis-host", help="Set the Redis host. (Default: localhost)", default="localhost")
@@ -200,15 +238,18 @@ if args.enable_ping == True and ping(args.ip) == False:
 
 # Query API.
 try:
+    if args.type == "AUTO":
+        api_result = api(args.ip, args.port, metric_to_api_command("type"), timeout=args.timeout, use_redis=args.redis, redis_ttl=args.redis_ttl, redis_host=args.redis_host, redis_database=args.redis_database, redis_prefix=args.redis_prefix)
+        args.type = calculate_value(None, "type", api_result)
     api_result = api(args.ip, args.port, metric_to_api_command(args.metric), timeout=args.timeout, use_redis=args.redis, redis_ttl=args.redis_ttl, redis_host=args.redis_host, redis_database=args.redis_database, redis_prefix=args.redis_prefix)
 except Exception as exception:
     if args.verbose is not None and args.verbose >= 1:
         print(exception)
-    print(metric_failure_default(args.metric))
+    print(metric_failure_default(args.metric, failure_value=args.failure_value))
     exit(1)
 
 # Calculate final result.
-result = calculate_value(args.type, args.metric, api_result)
+result = calculate_value(args.type, args.metric, api_result, failure_value=args.failure_value)
 
-# Return values.
+# Return values based on mode.
 print(result)
