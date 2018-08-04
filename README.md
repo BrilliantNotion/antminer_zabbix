@@ -8,9 +8,9 @@ From the command line, you can type `./antminer_zabbix.py -h` at any time to get
 
 The three required arguments are: TYPE, IP, and METRIC
 
-- TYPE is the Antminer type: A3+, D3, L3+, S9, T9+, or NA (Not Applicable)
+- TYPE is the Antminer type: A3+, D3, L3+, S9, T9+, or AUTO
 - IP is the IP of the Antminer. eg: 192.168.0.42
-- METRIC is the value you want to query: averageSpeed, averageSpeed5s, chainFailures, chipTemp, errorRate, fanFront, fanRear, pcbTemp, speed
+- METRIC is the value you want to query: averageSpeed, averageSpeed5s, chainFailures, chipTemp, errorRate, fanFront, fanRear, frequency, pcbTemp, speed, type, typeFull
 
 Usage Example:
 ```
@@ -29,12 +29,14 @@ $ ./antminer_zabbix.py S9 192.168.0.42 speed
 ## Metric Descriptions
 - averageSpeed (float): The calculated average hashrate of the Antminer in GH/s. Note: Due to a bug in some Antminer firmwares, this value is sometimes incorrectly reported as a positive value when hashing has completely stopped. It is recommended that averageSpeed5s be used instead.
 - averageSpeed5s (float): The calculated average hashrate of the Antminer in GH/s during the last 5 seconds. 
+- chainsActive (integer): The number of chains that are currently active. (Shown as "o" when operating.)
 - chainFailures (integer): The number of chain failures reported in the ASIC status. (Shown as "x" during failure.) 
 - chipTemp (integer): The highest reported chip temperature in celsius.
 - errorRate (float): The calculated error percentage provided by the Antminer. Note: Some Antminer firmwares sometimes report this value as > 100% when there are a high amount of errors.
 - fanFront (integer): The RPM of the front fan.
 - fanRear (integer): The RPM of the rear fan.
+- frequency (integer): The operational chip frequency.
 - pcbTemp (integer): The highest reported PCB board temperature in celsius.
 - speed (float): An alias for averageSpeed5s.
-
-
+- type (string): The type of miner. eg: S9
+- typeFull (string): The full type of miner. eg: Antminer S9
